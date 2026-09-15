@@ -419,13 +419,25 @@ def google_search(query: str, retries: int = 2) -> str:
             "-H", "Accept-Language: zh-CN,zh;q=0.9,en;q=0.8",
             url,
         ]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
-        stdout = result.stdout.strip()
+        # ★★★ 修改：去掉 text=True ★★★
+        result = subprocess.run(cmd, capture_output=True, timeout=20)
+        
+        # ★★★ 手动用 UTF-8 解码，忽略错误 ★★★
+        try:
+            stdout = result.stdout.decode('utf-8').strip()
+        except UnicodeDecodeError:
+            stdout = result.stdout.decode('gbk', errors='ignore').strip()
+        
         if stdout and len(stdout) > 500:
             return stdout
         if attempt < retries - 1:
             time.sleep(3)
-    return result.stdout.strip()
+    
+    # 最后一次尝试
+    try:
+        return result.stdout.decode('utf-8').strip()
+    except UnicodeDecodeError:
+        return result.stdout.decode('gbk', errors='ignore').strip()
 
 
 def extract_glassdoor_rating(html: str, company: str) -> str:

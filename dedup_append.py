@@ -25,11 +25,9 @@ def extract_job_id(url_or_id: str) -> str:
     """从 URL 或 ID 字符串中提取 job ID。"""
     if not url_or_id:
         return ""
-    # 从 URL 中提取 /job/{id}
     match = re.search(r'/job/(\d+)', str(url_or_id))
     if match:
         return match.group(1)
-    # 如果本身就是纯数字 ID
     if re.match(r'^\d{6,}$', str(url_or_id)):
         return str(url_or_id)
     return ""
@@ -40,7 +38,6 @@ def normalize_company(name: str) -> str:
     if not name:
         return ""
     name = name.lower().strip()
-    # 去除常见的法律后缀变体
     name = re.sub(r'\s*\(h\.?k\.?\)\s*', ' ', name)
     name = re.sub(r'\s*\(hong kong\)\s*', ' ', name)
     name = re.sub(r'\s*limited\s*', ' ', name)
@@ -74,9 +71,9 @@ def read_existing_from_csv(filepath: str) -> tuple:
             continue
         rows.append(row)
 
-        # 从第10列（职位链接）提取 job ID
-        if len(row) >= 10:
-            jid = extract_job_id(row[9])
+        # 从第11列（职位链接）提取 job ID（索引10）
+        if len(row) >= 11:
+            jid = extract_job_id(row[10])
             if jid:
                 existing_ids.add(jid)
 
@@ -114,13 +111,11 @@ def read_existing_from_xlsx(filepath: str) -> tuple:
             continue
         rows.append(row_vals)
 
-        # 第10列（索引9）是职位链接
-        if len(row_vals) >= 10:
-            jid = extract_job_id(row_vals[9])
+        if len(row_vals) >= 11:
+            jid = extract_job_id(row_vals[10])
             if jid:
                 existing_ids.add(jid)
 
-        # 第4列（索引3）是公司
         if len(row_vals) >= 4:
             norm = normalize_company(row_vals[3])
             if norm:
@@ -156,8 +151,6 @@ def dedup(new_jobs: list, existing_ids: set, existing_companies: set) -> list:
             dupes += 1
             continue
         if company and company in existing_companies:
-            # 公司名重复但 ID 不同的情况，检查 title 是否也相同
-            existing_titles = set()  # 这里不做 title 比较，保留公司名重复的可能性
             dupes += 1
             continue
 
@@ -168,21 +161,30 @@ def dedup(new_jobs: list, existing_ids: set, existing_companies: set) -> list:
 
 
 def job_to_csv_row(job: dict, seq: int) -> list:
-    """将 job dict 转换为 CSV 行（13列）。"""
+    """将 job dict 转换为 CSV 行（14列，含发布日期）。"""
+    # ★★★ 提取发布日期 ★★★
+    listing_date = job.get("listing_date", "")
+    if listing_date:
+        if "T" in listing_date:
+            listing_date = listing_date.split("T")[0]
+        elif " " in listing_date:
+            listing_date = listing_date.split(" ")[0]
+    
     return [
         str(seq),                                  # 1. 序号
-        job.get("company_type", ""),               # 2. 类型
+        job.get("company_type", "") or "待确认",    # 2. 类型
         job.get("industry_cn", "") or job.get("industry", ""),  # 3. 行业
         job.get("company", ""),                    # 4. 公司
         job.get("rating", "") or "无评分",          # 5. 公司评分
         job.get("title", ""),                      # 6. 职位名称
-        job.get("salary", ""),                     # 7. 薪资范围
+        job.get("salary", "面议"),                 # 7. 薪资范围
         job.get("jd", ""),                         # 8. 工作描述
         job.get("location", ""),                   # 9. 地点
-        job.get("link", ""),                       # 10. 职位链接
-        "",                                        # 11. 进程
-        "",                                        # 12. 投递时间
-        "",                                        # 13. 备注
+        listing_date,                              # 10. ★★★ 发布日期 ★★★
+        job.get("link", ""),                       # 11. 职位链接
+        "",                                        # 12. 进程
+        "",                                        # 13. 投递时间
+        "",                                        # 14. 备注
     ]
 
 
@@ -218,18 +220,15 @@ def main():
 
     args = parser.parse_args()
 
-    # 判断基准文件格式
     ext = os.path.splitext(args.existing)[1].lower()
     if ext == ".xlsx":
         existing_ids, existing_companies, header, rows = read_existing_from_xlsx(args.existing)
     else:
         existing_ids, existing_companies, header, rows = read_existing_from_csv(args.existing)
 
-    # 加载新岗位
     new_jobs = load_new_jobs(args.new)
     print(f"[INFO] 新岗位输入: {len(new_jobs)} 个", file=sys.stderr)
 
-    # 去重
     unique = dedup(new_jobs, existing_ids, existing_companies)
 
     if not unique:
@@ -238,13 +237,11 @@ def main():
             json.dump([], f)
         return
 
-    # 保存去重后的新岗位
     if not args.dry_run:
         with open(args.output, "w", encoding="utf-8") as f:
             json.dump(unique, f, ensure_ascii=False, indent=2)
         print(f"[OUTPUT] {len(unique)} 个新岗位 → {args.output}", file=sys.stderr)
 
-    # 追加到 CSV
     if args.updated_csv and not args.dry_run:
         max_seq = get_max_seq(rows, header)
         new_rows = []
@@ -252,13 +249,12 @@ def main():
             seq = max_seq + i + 1
             new_rows.append(job_to_csv_row(job, seq))
 
-        # 确定表头
-        if not header:
-            header = [
-                "序号", "类型", "行业", "公司", "公司评分",
-                "职位名称", "薪资范围", "工作描述", "地点",
-                "职位名称点开的链接", "进程", "投递时间", "备注",
-            ]
+        # ★★★ 强制使用14列标准表头 ★★★
+        header = [
+            "序号", "类型", "行业", "公司", "公司评分",
+            "职位名称", "薪资范围", "工作描述", "地点",
+            "发布日期", "职位名称点开的链接", "进程", "投递时间", "备注",
+        ]
 
         all_rows = rows + new_rows
 

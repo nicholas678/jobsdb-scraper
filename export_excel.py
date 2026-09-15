@@ -1,17 +1,12 @@
 #!/usr/bin/env python3
 """
-从 CSV 生成格式化的 Excel 文件（仅前10列）。
+从 CSV 生成格式化的 Excel 文件（含发布日期）。
 
 用法:
     python3 export_excel.py \
-      --input "../工作 - Sheet1.csv" \
-      --output "岗位收集_Marketing_20260629.xlsx"
-
-    # 仅导出新增部分（指定起始序号）
-    python3 export_excel.py \
-      --input "../工作 - Sheet1.csv" \
-      --output "新岗位_20260629.xlsx" \
-      --from-seq 52
+      --input esg_jd.json \
+      --output ESG岗位收集.xlsx \
+      --new-only
 """
 
 import argparse
@@ -31,13 +26,12 @@ except ImportError:
     sys.exit(1)
 
 
-# 前10列的表头
-HEADERS_10 = [
+# ★★★ 11列表头 ★★★
+HEADERS_11 = [
     "序号", "类型", "行业", "公司", "公司评分",
-    "职位名称", "薪资范围", "工作描述", "地点", "职位名称点开的链接",
+    "职位名称", "薪资范围", "工作描述", "地点", "发布日期", "职位名称点开的链接",
 ]
 
-# 列宽预设
 COL_WIDTHS = {
     "序号": 6,
     "类型": 10,
@@ -48,19 +42,17 @@ COL_WIDTHS = {
     "薪资范围": 18,
     "工作描述": 60,
     "地点": 18,
+    "发布日期": 14,
     "职位名称点开的链接": 40,
 }
 
 
 def read_csv(filepath: str) -> list:
-    """读取 CSV，返回行列表（每条为 dict）。"""
     with open(filepath, "r", encoding="utf-8-sig") as f:
         content = f.read()
-
     reader = csv.DictReader(io.StringIO(content))
     rows = []
     for row in reader:
-        # 跳过完全空行
         if not any(v.strip() for v in row.values() if v):
             continue
         rows.append(row)
@@ -69,40 +61,33 @@ def read_csv(filepath: str) -> list:
 
 def generate_excel(rows: list, output_path: str, from_seq: int = 0,
                    title: str = "", sheet_name: str = "岗位收集"):
-    """生成格式化的 Excel 文件。"""
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = sheet_name
 
-    # ── 样式定义 ──────────────────────────────────────────────────
     header_font = Font(name="Microsoft YaHei", size=11, bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="2F5496", end_color="2F5496", fill_type="solid")
     header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-
     cell_font = Font(name="Microsoft YaHei", size=10)
     cell_alignment = Alignment(vertical="top", wrap_text=True)
     center_alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
-
     thin_border = Border(
         left=Side(style="thin", color="D9D9D9"),
         right=Side(style="thin", color="D9D9D9"),
         top=Side(style="thin", color="D9D9D9"),
         bottom=Side(style="thin", color="D9D9D9"),
     )
-
     alt_fill = PatternFill(start_color="F2F7FC", end_color="F2F7FC", fill_type="solid")
 
-    # ── 标题行（可选） ─────────────────────────────────────────────
     current_row = 1
     if title:
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=11)
         title_cell = ws.cell(row=1, column=1, value=title)
         title_cell.font = Font(name="Microsoft YaHei", size=14, bold=True, color="2F5496")
         title_cell.alignment = Alignment(horizontal="center", vertical="center")
         current_row = 2
 
-    # ── 表头 ──────────────────────────────────────────────────────
-    for col_idx, header in enumerate(HEADERS_10, 1):
+    for col_idx, header in enumerate(HEADERS_11, 1):
         cell = ws.cell(row=current_row, column=col_idx, value=header)
         cell.font = header_font
         cell.fill = header_fill
@@ -110,21 +95,16 @@ def generate_excel(rows: list, output_path: str, from_seq: int = 0,
         cell.border = thin_border
     current_row += 1
 
-    # ── 数据行 ─────────────────────────────────────────────────────
     row_count = 0
     for data_row in rows:
-        # 提取序号
         try:
             seq = int(data_row.get("序号", "0").strip())
         except (ValueError, AttributeError):
             seq = 0
-
-        # 过滤：如果指定了起始序号，跳过之前的行
         if from_seq > 0 and seq < from_seq:
             continue
 
-        for col_idx, header in enumerate(HEADERS_10, 1):
-            # 映射 CSV 列名到实际字段名
+        for col_idx, header in enumerate(HEADERS_11, 1):
             field_map = {
                 "序号": "序号",
                 "类型": "类型",
@@ -135,60 +115,91 @@ def generate_excel(rows: list, output_path: str, from_seq: int = 0,
                 "薪资范围": "薪资范围",
                 "工作描述": "工作描述",
                 "地点": "地点",
+                "发布日期": "发布日期",
                 "职位名称点开的链接": "职位名称点开的链接",
             }
             field = field_map.get(header, header)
             value = data_row.get(field, "")
-
             cell = ws.cell(row=current_row, column=col_idx, value=value)
             cell.font = cell_font
             cell.border = thin_border
-
-            # 居中的列
             if header in ("序号", "类型", "公司评分", "薪资范围"):
                 cell.alignment = center_alignment
             else:
                 cell.alignment = cell_alignment
-
-            # 交替行颜色
             if row_count % 2 == 1:
                 cell.fill = alt_fill
-
         current_row += 1
         row_count += 1
 
-    # ── 设置列宽 ──────────────────────────────────────────────────
-    for col_idx, header in enumerate(HEADERS_10, 1):
-        width = COL_WIDTHS.get(header, 15)
-        ws.column_dimensions[get_column_letter(col_idx)].width = width
+    for col_idx, header in enumerate(HEADERS_11, 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = COL_WIDTHS.get(header, 15)
 
-    # 冻结首行（表头）
     freeze_row = 2 if title else 1
     ws.freeze_panes = f"A{freeze_row + 1}"
-
-    # ── 设置行高 ──────────────────────────────────────────────────
-    ws.row_dimensions[freeze_row].height = 22  # 表头行高
-
-    # ── 保存 ──────────────────────────────────────────────────────
+    ws.row_dimensions[freeze_row].height = 22
     wb.save(output_path)
     return row_count
 
 
+def format_jd_text(job: dict) -> str:
+    parts = []
+    jd = job.get("jd", "")
+    if isinstance(jd, list):
+        jd = "\n".join(jd)
+    if jd and jd.strip():
+        parts.append(jd.strip())
+
+    bullets = job.get("bullet_points", [])
+    if isinstance(bullets, str):
+        bullets = [b.strip() for b in bullets.split("\n") if b.strip()]
+    if bullets and len(bullets) > 0:
+        if parts:
+            parts.append("\n" + "=" * 40 + "\n")
+        parts.append("【岗位亮点】")
+        for bullet in bullets:
+            if isinstance(bullet, str) and bullet.strip():
+                parts.append(f"• {bullet.strip()}")
+
+    if not parts:
+        teaser = job.get("teaser", "")
+        if teaser and teaser.strip():
+            parts.append(teaser.strip())
+    if not parts:
+        return ""
+    return "\n".join(parts)
+
+
 def main():
     parser = argparse.ArgumentParser(description="生成格式化 Excel")
-    parser.add_argument("--input", "-i", required=True, help="输入 CSV 文件")
+    parser.add_argument("--input", "-i", required=True, help="输入 CSV 或 JSON 文件")
     parser.add_argument("--output", "-o", required=True, help="输出 Excel 文件 (.xlsx)")
-    parser.add_argument("--from-seq", type=int, default=0, help="仅导出此序号及之后的行")
+    parser.add_argument("--from-seq", type=int, default=0, help="仅导出此序号及之后的行（仅 CSV 模式）")
     parser.add_argument("--title", help="Excel 标题")
     parser.add_argument("--sheet-name", default="岗位收集", help="工作表名称")
-    parser.add_argument("--new-only", help="仅导出新岗位 JSON，生成独立 Excel")
+    parser.add_argument("--new-only", action="store_true", help="从 JSON 直接生成 Excel（新岗位模式）")
 
     args = parser.parse_args()
 
     if args.new_only:
-        # 从 JSON 直接生成 Excel（不需要 CSV 中间步骤）
-        with open(args.new_only, "r", encoding="utf-8") as f:
-            jobs = json.load(f)
+        with open(args.input, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        if isinstance(data, list):
+            jobs = data
+        elif isinstance(data, dict) and "jobs" in data:
+            jobs = data["jobs"]
+        elif isinstance(data, dict):
+            jobs = [data]
+        else:
+            jobs = []
+            print("[WARN] 无法识别的 JSON 格式", file=sys.stderr)
+
+        if not jobs:
+            print("[ERROR] 没有可导出的数据", file=sys.stderr)
+            sys.exit(1)
+
+        print(f"[INFO] 读取 {len(jobs)} 个岗位", file=sys.stderr)
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -206,8 +217,7 @@ def main():
             bottom=Side(style="thin", color="D9D9D9"),
         )
 
-        # 表头
-        for col_idx, h in enumerate(HEADERS_10, 1):
+        for col_idx, h in enumerate(HEADERS_11, 1):
             cell = ws.cell(row=1, column=col_idx, value=h)
             cell.font = header_font
             cell.fill = header_fill
@@ -215,26 +225,46 @@ def main():
             cell.border = thin_border
 
         for i, job in enumerate(jobs):
+            print(f"[DEBUG] 第 {i+1} 条: title={job.get('title', '空')}, jd长度={len(job.get('jd', ''))}", file=sys.stderr)
             row_num = i + 2
+
+            industry = job.get("industry_cn", "")
+            if not industry:
+                industry = job.get("industry", "")
+            if not industry:
+                industry = job.get("subclass", "")
+
+            jd_text = format_jd_text(job)
+
+            # ★★★ 提取发布日期 ★★★
+            listing_date = job.get("listing_date", "")
+            if listing_date:
+                if "T" in listing_date:
+                    listing_date = listing_date.split("T")[0]
+                elif " " in listing_date:
+                    listing_date = listing_date.split(" ")[0]
+
             values = [
                 str(i + 1),
-                job.get("company_type", ""),
-                job.get("industry_cn", "") or job.get("industry", ""),
+                job.get("company_type", "") or "待确认",
+                industry or "其他",
                 job.get("company", ""),
                 job.get("rating", "") or "无评分",
                 job.get("title", ""),
-                job.get("salary", ""),
-                job.get("jd", ""),
+                job.get("salary", "面议"),
+                jd_text,
                 job.get("location", ""),
+                listing_date,  # ★★★ 发布日期列 ★★★
                 job.get("link", ""),
             ]
+
             for col_idx, val in enumerate(values, 1):
                 cell = ws.cell(row=row_num, column=col_idx, value=val)
                 cell.font = cell_font
                 cell.alignment = cell_alignment
                 cell.border = thin_border
 
-        for col_idx, header in enumerate(HEADERS_10, 1):
+        for col_idx, header in enumerate(HEADERS_11, 1):
             ws.column_dimensions[get_column_letter(col_idx)].width = COL_WIDTHS.get(header, 15)
 
         ws.freeze_panes = "A2"
@@ -242,7 +272,7 @@ def main():
         print(f"[DONE] {len(jobs)} 个岗位 → {args.output}", file=sys.stderr)
         return
 
-    # 默认：从 CSV 生成 Excel
+    # ── CSV 模式 ──────────────────────────────────────────────
     rows = read_csv(args.input)
     print(f"[INFO] 从 CSV 读取 {len(rows)} 行", file=sys.stderr)
 
