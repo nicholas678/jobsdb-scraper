@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 去重 + 追加：将新岗位与已有基准文件比较，输出去重后的新岗位和更新后的 CSV。
+去重规则（2026-11-20 起）：只按 job ID，不再按公司名（旧规则会误杀同公司新岗位）。
 
 用法:
     python3 dedup_append.py \
@@ -139,24 +140,29 @@ def load_new_jobs(filepath: str) -> list:
     return []
 
 
-def dedup(new_jobs: list, existing_ids: set, existing_companies: set) -> list:
-    """去重：按 job ID + 公司名去重。"""
+def dedup(new_jobs: list, existing_ids: set, existing_companies: set = None) -> list:
+    """去重：只按 job ID 去重（2026-11-20 按用户要求修改）。
+
+    旧版还按公司名去重——主文件里有该公司的任何旧岗位，就会把该公司
+    全部新岗位误杀（实测 eng 285 个岗位被公司规则大量误杀）。改为只认
+    职位 ID：ID 没出现过就是新岗位，不理公司；同一批次内重复的 ID
+    也只保留第一条。existing_companies 参数保留仅为兼容旧调用，不再使用。
+    """
     unique = []
     dupes = 0
+    seen_batch = set()
     for job in new_jobs:
         jid = str(job.get("id", ""))
-        company = normalize_company(job.get("company", ""))
 
-        if jid and jid in existing_ids:
+        if jid and (jid in existing_ids or jid in seen_batch):
             dupes += 1
             continue
-        if company and company in existing_companies:
-            dupes += 1
-            continue
+        if jid:
+            seen_batch.add(jid)
 
         unique.append(job)
 
-    print(f"[INFO] 去重: {len(new_jobs)} → {len(unique)} 新岗位 ({dupes} 重复)", file=sys.stderr)
+    print(f"[INFO] 去重（只按 job ID）: {len(new_jobs)} → {len(unique)} 新岗位 ({dupes} 重复)", file=sys.stderr)
     return unique
 
 
