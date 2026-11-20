@@ -1,0 +1,22 @@
+# ── Python 编译缓存 ──
+__pycache__/
+*.py[cod]
+*$py.class
+
+# ── 爬虫生成的数据文件（一律不传）──
+*.json
+*.csv
+*.xlsx
+*.xls
+
+# ── 日志和临时文件 ──
+*.log
+*.tmp
+*.bak
+
+# ── Node.js 依赖 ──
+node_modules/
+
+# ── 操作系统生成的文件 ──
+.DS_Store
+Thumbs.db
